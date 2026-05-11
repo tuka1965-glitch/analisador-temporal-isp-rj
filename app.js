@@ -4,12 +4,15 @@ const state = {
   rows: [],
   headers: [],
   indicators: [],
+  populationByMunicipalityYear: new Map(),
+  populationLoaded: false,
 };
 
 const els = {
   fileInput: document.getElementById("fileInput"),
   indicatorSelect: document.getElementById("indicatorSelect"),
   periodSelect: document.getElementById("periodSelect"),
+  scaleSelect: document.getElementById("scaleSelect"),
   geoLevel: document.getElementById("geoLevel"),
   startYear: document.getElementById("startYear"),
   endYear: document.getElementById("endYear"),
@@ -47,6 +50,7 @@ els.fileInput.addEventListener("change", async (event) => {
 for (const element of [
   els.indicatorSelect,
   els.periodSelect,
+  els.scaleSelect,
   els.geoLevel,
   els.startYear,
   els.endYear,
@@ -80,6 +84,7 @@ els.copyAnalysis.addEventListener("click", async () => {
 loadDefaultCsv();
 
 async function loadDefaultCsv() {
+  await loadPopulationCsv();
   try {
     const response = await fetch("data/BaseDPEvolucaoMensalCisp.csv", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -87,6 +92,31 @@ async function loadDefaultCsv() {
   } catch (error) {
     els.statusBox.textContent =
       "Nao consegui carregar a base padrao neste ambiente. Se estiver abrindo o HTML localmente, use Abrir CSV.";
+  }
+}
+
+async function loadPopulationCsv() {
+  try {
+    const response = await fetch("data/populacao_municipios_rj_ano.csv", { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const parsed = parseCsv(await response.text());
+    state.populationByMunicipalityYear.clear();
+    for (const row of parsed.rows) {
+      const code = String(row.codigo_municipio || "").trim();
+      const year = Number(row.ano);
+      const population = parseNumber(row.populacao);
+      if (!code || !Number.isInteger(year) || !Number.isFinite(population) || population <= 0) continue;
+      state.populationByMunicipalityYear.set(`${code}|${year}`, {
+        code,
+        year,
+        population,
+        source: row.fonte || "",
+        method: row.metodo || "",
+      });
+    }
+    state.populationLoaded = state.populationByMunicipalityYear.size > 0;
+  } catch (error) {
+    state.populationLoaded = false;
   }
 }
 
@@ -197,6 +227,7 @@ function analyze() {
 
   const indicator = els.indicatorSelect.value;
   const period = els.periodSelect.value;
+  const scale = els.scaleSelect.value;
   const geoLevel = els.geoLevel.value;
   const startYear = Number(els.startYear.value);
   const endYear = Number(els.endYear.value);
@@ -204,8 +235,11 @@ function analyze() {
   const filters = selectedFilters();
 
   const buckets = new Map();
+  const rateBuckets = new Map();
   const territoryBuckets = new Map();
+  const territoryRateBuckets = new Map();
   let rowsUsed = 0;
+  let missingPopulation = 0;
 
   for (const row of state.rows) {
     const year = Number(row.ano);
@@ -222,10 +256,23 @@ function analyze() {
     const territoryMap = territoryBuckets.get(territory) || new Map();
     territoryMap.set(key, (territoryMap.get(key) || 0) + value);
     territoryBuckets.set(territory, territoryMap);
+
+    const municipalityCode = String(row.mcirc || "").trim();
+    if (scale === "rate") {
+      const population = state.populationByMunicipalityYear.get(`${municipalityCode}|${year}`);
+      if (population) {
+        addRatePart(rateBuckets, key, municipalityCode, value, population.population);
+        addTerritoryRatePart(territoryRateBuckets, territory, key, municipalityCode, value, population.population);
+      } else {
+        missingPopulation += 1;
+      }
+    }
     rowsUsed += 1;
   }
 
-  const series = Array.from(buckets.entries())
+  const sourceBuckets = scale === "rate" ? rateBucketsToValues(rateBuckets) : buckets;
+  const sourceTerritories = scale === "rate" ? rateTerritoryBucketsToValues(territoryRateBuckets) : territoryBuckets;
+  const series = Array.from(sourceBuckets.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, value]) => ({ key, value }));
 
@@ -233,11 +280,11 @@ function analyze() {
   addChangeAndAnomalies(series);
   addYearOverYear(series, period);
 
-  const territories = buildTerritoryResults(territoryBuckets, series);
+  const territories = buildTerritoryResults(sourceTerritories, series);
   renderMetrics(series, territories, rowsUsed);
   renderChart(series);
   renderSummaryTable(series);
-  renderNarrative(series, territories, { indicator, period, geoLevel, startYear, endYear });
+  renderNarrative(series, territories, { indicator, period, geoLevel, startYear, endYear, scale, missingPopulation });
   renderForecast(series, period);
   renderTerritoryTable(territories);
 }
@@ -260,6 +307,36 @@ function passesFilters(row, filters) {
     if (selected.size && !selected.has(row[field])) return false;
   }
   return true;
+}
+
+function addRatePart(map, period, municipalityCode, cases, population) {
+  const item = map.get(period) || { cases: 0, populationByMunicipality: new Map() };
+  item.cases += cases;
+  item.populationByMunicipality.set(municipalityCode, population);
+  map.set(period, item);
+}
+
+function addTerritoryRatePart(map, territory, period, municipalityCode, cases, population) {
+  const territoryMap = map.get(territory) || new Map();
+  addRatePart(territoryMap, period, municipalityCode, cases, population);
+  map.set(territory, territoryMap);
+}
+
+function rateBucketsToValues(map) {
+  const values = new Map();
+  for (const [period, item] of map.entries()) {
+    const population = Array.from(item.populationByMunicipality.values()).reduce((sum, value) => sum + value, 0);
+    values.set(period, population ? (item.cases / population) * 100000 : 0);
+  }
+  return values;
+}
+
+function rateTerritoryBucketsToValues(map) {
+  const values = new Map();
+  for (const [territory, territoryMap] of map.entries()) {
+    values.set(territory, rateBucketsToValues(territoryMap));
+  }
+  return values;
 }
 
 function periodKey(year, month, period) {
@@ -406,9 +483,21 @@ function renderNarrative(series, territories, context) {
   const topTerritories = territories.slice(0, 5).map((item) => `${item.territory} (${formatPercent(item.share)})`);
   const risingTerritories = territories.filter((item) => item.slope > 0).length;
   const fallingTerritories = territories.filter((item) => item.slope < 0).length;
+  const scaleText =
+    context.scale === "rate"
+      ? "Os valores estao expressos como taxa por 100 mil habitantes, usando populacao municipal anual do IBGE e o codigo `mcirc` como chave."
+      : "Os valores estao expressos em casos absolutos.";
+  const populationWarning =
+    context.scale === "rate" && context.missingPopulation
+      ? ` Foram ignoradas ${context.missingPopulation.toLocaleString("pt-BR")} linhas sem populacao municipal correspondente.`
+      : "";
+  const geoWarning =
+    context.scale === "rate" && context.geoLevel !== "munic"
+      ? " Para AISP, RISP e CISP, a taxa usa a soma das populacoes dos municipios presentes no recorte; isso e uma aproximacao, porque essas areas nao equivalem necessariamente a municipios inteiros."
+      : "";
 
   const paragraphs = [
-    `O indicador ${labelize(context.indicator)} foi analisado entre ${context.startYear} e ${context.endYear}. A serie vai de ${formatNumber(first.value)} em ${first.key} para ${formatNumber(last.value)} em ${last.key}, uma variacao acumulada de ${formatPercent(totalChange)}. A inclinacao linear e de ${formatNumber(slope)} por periodo, classificada como ${trendLabel(slope).toLowerCase()}.`,
+    `O indicador ${labelize(context.indicator)} foi analisado entre ${context.startYear} e ${context.endYear}. ${scaleText}${populationWarning}${geoWarning} A serie vai de ${formatNumber(first.value)} em ${first.key} para ${formatNumber(last.value)} em ${last.key}, uma variacao acumulada de ${formatPercent(totalChange)}. A inclinacao linear e de ${formatNumber(slope)} por periodo, classificada como ${trendLabel(slope).toLowerCase()}.`,
     seasonal,
     abrupt.length
       ? `As quebras percentuais mais fortes aparecem em ${abrupt.join(", ")}. Esses pontos merecem verificacao porque podem indicar choque real, mudanca operacional, revisao de registro ou efeito de base quando o periodo anterior era muito baixo.`

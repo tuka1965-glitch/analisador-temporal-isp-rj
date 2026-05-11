@@ -67,7 +67,7 @@ main {
 
 .controls {
   display: grid;
-  grid-template-columns: minmax(190px, 2fr) repeat(5, minmax(110px, 1fr)) auto auto;
+  grid-template-columns: minmax(190px, 2fr) repeat(6, minmax(110px, 1fr)) auto auto;
   gap: 14px;
   padding: 16px;
 }

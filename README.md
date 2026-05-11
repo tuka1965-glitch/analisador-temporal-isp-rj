@@ -55,3 +55,17 @@ Arquivos principais:
 - `app.js`
 - `README.md`
 - `data/BaseDPEvolucaoMensalCisp.csv`
+- `data/populacao_municipios_rj_ano.csv`
+
+## Taxas por 100 mil habitantes
+
+O app inclui a opcao **Escala > Taxa por 100 mil hab.**. Ela usa `mcirc` como codigo municipal IBGE e cruza os registros criminais com `data/populacao_municipios_rj_ano.csv`.
+
+A base populacional foi montada com fontes oficiais do IBGE/SIDRA:
+
+- tabela 6579: estimativas municipais de populacao;
+- tabela 793: Contagem da Populacao 2007;
+- tabela 200: Censo Demografico 2010;
+- tabela 4714: Censo Demografico 2022.
+
+O ano de 2023 foi preenchido por interpolacao linear entre o Censo 2022 e a estimativa 2024, com o campo `metodo` marcado como `interpolacao_linear_2022_2024`. Para municipio, a taxa e direta. Para AISP, RISP e CISP, a taxa usa a soma das populacoes dos municipios presentes no recorte, portanto e uma aproximacao quando a area de seguranca nao corresponde a municipios inteiros.
