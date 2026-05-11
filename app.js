@@ -18,6 +18,7 @@ const els = {
   endYear: document.getElementById("endYear"),
   movingAverage: document.getElementById("movingAverage"),
   analyzeButton: document.getElementById("analyzeButton"),
+  alertButton: document.getElementById("alertButton"),
   printButton: document.getElementById("printButton"),
   statusBox: document.getElementById("statusBox"),
   rowsUsed: document.getElementById("rowsUsed"),
@@ -34,6 +35,9 @@ const els = {
   chartSubtitle: document.getElementById("chartSubtitle"),
   analysisText: document.getElementById("analysisText"),
   copyAnalysis: document.getElementById("copyAnalysis"),
+  alertText: document.getElementById("alertText"),
+  alertBody: document.getElementById("alertBody"),
+  copyAlerts: document.getElementById("copyAlerts"),
   forecastText: document.getElementById("forecastText"),
   forecastBody: document.getElementById("forecastBody"),
   territoryText: document.getElementById("territoryText"),
@@ -64,6 +68,7 @@ for (const element of [
 }
 
 els.analyzeButton.addEventListener("click", analyze);
+els.alertButton.addEventListener("click", renderRecentAlerts);
 els.printButton.addEventListener("click", () => window.print());
 els.clearFilters.addEventListener("click", () => {
   for (const select of [els.municFilter, els.aispFilter, els.rispFilter, els.regiaoFilter]) {
@@ -78,6 +83,15 @@ els.copyAnalysis.addEventListener("click", async () => {
   els.copyAnalysis.textContent = "Copiado";
   setTimeout(() => {
     els.copyAnalysis.textContent = "Copiar";
+  }, 1200);
+});
+els.copyAlerts.addEventListener("click", async () => {
+  const text = els.alertText.innerText.trim();
+  if (!text) return;
+  await navigator.clipboard.writeText(text);
+  els.copyAlerts.textContent = "Copiado";
+  setTimeout(() => {
+    els.copyAlerts.textContent = "Copiar";
   }, 1200);
 });
 
@@ -140,6 +154,7 @@ function loadCsv(text, sourceName) {
 
   els.statusBox.textContent = `${sourceName}: ${state.rows.length.toLocaleString("pt-BR")} linhas, ${state.indicators.length} indicadores criminais.`;
   els.analyzeButton.disabled = false;
+  els.alertButton.disabled = false;
   els.printButton.disabled = false;
   analyze();
 }
@@ -558,6 +573,168 @@ function renderTerritoryTable(territories) {
     els.territoryBody.appendChild(tr);
   }
 }
+
+function renderRecentAlerts() {
+  if (!state.rows.length) return;
+
+  const periods = Array.from(
+    new Set(
+      state.rows
+        .map((row) => {
+          const year = Number(row.ano);
+          const month = Number(row.mes);
+          return Number.isInteger(year) && Number.isInteger(month) ? periodKey(year, month, "month") : "";
+        })
+        .filter(Boolean),
+    ),
+  ).sort();
+
+  if (periods.length < 18) {
+    els.alertText.textContent = "A base precisa de pelo menos 18 meses para comparar os ultimos 6 meses com o mesmo periodo do ano anterior.";
+    els.alertBody.innerHTML = '<tr><td colspan="5">Sem janela temporal suficiente.</td></tr>';
+    els.copyAlerts.disabled = true;
+    return;
+  }
+
+  const recentPeriods = periods.slice(-6);
+  const priorPeriods = recentPeriods.map((period) => priorKey(period, "month"));
+  const available = new Set(periods);
+  if (!priorPeriods.every((period) => available.has(period))) {
+    els.alertText.textContent = "Nao encontrei todos os meses equivalentes do ano anterior para a janela mais recente.";
+    els.alertBody.innerHTML = '<tr><td colspan="5">Comparacao anual indisponivel.</td></tr>';
+    els.copyAlerts.disabled = true;
+    return;
+  }
+
+  const filters = selectedFilters();
+  const alerts = [];
+  for (const indicator of state.indicators) {
+    const totals = totalsForIndicator(indicator, recentPeriods, priorPeriods, filters);
+    if (totals.recent < 30 || totals.diff <= 0) continue;
+    const pct = totals.prior ? totals.diff / totals.prior : null;
+    if (totals.diff < 100 && (!pct || pct < 0.1)) continue;
+    alerts.push({
+      indicator,
+      ...totals,
+      pct,
+      territories: priorityTerritories(indicator, recentPeriods, priorPeriods, filters),
+    });
+  }
+
+  alerts.sort((a, b) => b.diff - a.diff || (b.pct || 0) - (a.pct || 0));
+  renderAlertTable(alerts.slice(0, 15));
+  renderAlertText(alerts, recentPeriods, priorPeriods);
+}
+
+function totalsForIndicator(indicator, recentPeriods, priorPeriods, filters) {
+  let recent = 0;
+  let prior = 0;
+  const recentSet = new Set(recentPeriods);
+  const priorSet = new Set(priorPeriods);
+  for (const row of state.rows) {
+    if (!passesFilters(row, filters)) continue;
+    const key = periodKey(Number(row.ano), Number(row.mes), "month");
+    if (recentSet.has(key)) recent += parseNumber(row[indicator]);
+    if (priorSet.has(key)) prior += parseNumber(row[indicator]);
+  }
+  return { recent, prior, diff: recent - prior };
+}
+
+function priorityTerritories(indicator, recentPeriods, priorPeriods, filters) {
+  const parts = [];
+  for (const geo of ["aisp", "munic", "cisp"]) {
+    const ranked = territoryAlertRanking(indicator, geo, recentPeriods, priorPeriods, filters).slice(0, 3);
+    if (ranked.length) {
+      parts.push(`${labelize(geo)}: ${ranked.map((item) => `${item.label} (+${formatNumber(item.diff)})`).join(", ")}`);
+    }
+  }
+  return parts;
+}
+
+function territoryAlertRanking(indicator, geo, recentPeriods, priorPeriods, filters) {
+  const recentSet = new Set(recentPeriods);
+  const priorSet = new Set(priorPeriods);
+  const map = new Map();
+
+  for (const row of state.rows) {
+    if (!passesFilters(row, filters)) continue;
+    const key = periodKey(Number(row.ano), Number(row.mes), "month");
+    if (!recentSet.has(key) && !priorSet.has(key)) continue;
+
+    const id = row[geo] || "(vazio)";
+    const item = map.get(id) || {
+      id,
+      label: geo === "cisp" ? `${row.cisp} (${row.munic})` : id,
+      recent: 0,
+      prior: 0,
+    };
+    if (recentSet.has(key)) item.recent += parseNumber(row[indicator]);
+    if (priorSet.has(key)) item.prior += parseNumber(row[indicator]);
+    map.set(id, item);
+  }
+
+  return Array.from(map.values())
+    .map((item) => ({ ...item, diff: item.recent - item.prior, pct: item.prior ? (item.recent - item.prior) / item.prior : null }))
+    .filter((item) => item.diff > 0 && item.recent >= 5)
+    .sort((a, b) => b.diff - a.diff || (b.pct || 0) - (a.pct || 0));
+}
+
+function renderAlertTable(alerts) {
+  els.alertBody.innerHTML = "";
+  if (!alerts.length) {
+    els.alertBody.innerHTML = '<tr><td colspan="5">Nenhum indicador ultrapassou os limiares de alerta.</td></tr>';
+    return;
+  }
+
+  for (const alert of alerts) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${labelize(alert.indicator)}</td>
+      <td>${formatNumber(alert.prior)}</td>
+      <td>${formatNumber(alert.recent)}</td>
+      <td class="up">+${formatNumber(alert.diff)} (${formatPercent(alert.pct)})</td>
+      <td>${alert.territories.slice(0, 2).join(" | ")}</td>
+    `;
+    els.alertBody.appendChild(tr);
+  }
+}
+
+function renderAlertText(alerts, recentPeriods, priorPeriods) {
+  if (!alerts.length) {
+    els.alertText.textContent = "Nao ha alertas relevantes na comparacao dos ultimos 6 meses contra o mesmo periodo do ano anterior.";
+    els.copyAlerts.disabled = true;
+    return;
+  }
+
+  const selected = alerts.slice(0, 8);
+  const operational = selected.filter((alert) => !administrativeIndicators.has(alert.indicator));
+  const paragraphs = [
+    `A janela recente vai de ${recentPeriods[0]} a ${recentPeriods[recentPeriods.length - 1]} e foi comparada com ${priorPeriods[0]} a ${priorPeriods[priorPeriods.length - 1]}, controlando melhor a sazonalidade anual. Foram encontrados ${alerts.length} indicadores com aumento relevante.`,
+    `Os maiores crescimentos absolutos sao ${selected
+      .map((alert) => `${labelize(alert.indicator)} (+${formatNumber(alert.diff)}, ${formatPercent(alert.pct)})`)
+      .join(", ")}.`,
+    operational.length
+      ? `Para orientar atuacao territorial, os alertas operacionais mais acionaveis sao ${operational
+          .slice(0, 5)
+          .map((alert) => `${labelize(alert.indicator)} [${alert.territories[0] || "sem territorio destacado"}]`)
+          .join("; ")}.`
+      : "Os principais crescimentos estao em indicadores administrativos ou de produtividade policial; eles devem ser interpretados junto com mudancas de registro e operacoes.",
+    "Indicadores como registro de ocorrencias, APF e apreensoes podem refletir mudanca de registro ou produtividade policial, nao apenas aumento de vitimizacao. Use esses alertas como triagem inicial e valide com inteligencia local.",
+  ];
+  els.alertText.innerHTML = paragraphs.map((paragraph) => `<p>${paragraph}</p>`).join("");
+  els.copyAlerts.disabled = false;
+}
+
+const administrativeIndicators = new Set([
+  "registro_ocorrencias",
+  "apf",
+  "aaapai",
+  "cmp",
+  "cmba",
+  "apreensao_drogas",
+  "apreensao_drogas_sem_autor",
+  "recuperacao_veiculos",
+]);
 
 function abruptChanges(series) {
   return series

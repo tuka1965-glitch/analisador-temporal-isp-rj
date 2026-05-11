@@ -41,6 +41,7 @@ As demais colunas numericas sao tratadas como indicadores criminais selecionavei
 - Quebras abruptas.
 - Projecao linear simples para os proximos 3 periodos.
 - Ranking territorial por municipio, CISP, AISP, RISP ou regiao.
+- Botao **Alertas recentes**, que compara os ultimos 6 meses disponiveis com o mesmo periodo do ano anterior e lista crimes em alta com AISP, municipio e CISP prioritarios.
 - Texto automatico em paragrafos para uso em relatorio.
 - Exportacao do relatorio pelo navegador em PDF.
 
