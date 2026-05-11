@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Analisador Temporal ISP RJ</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Analisador Temporal ISP RJ</h1>
+        <p>Analise mensal de indicadores criminais por CISP, AISP, RISP, municipio e regiao.</p>
+      </div>
+      <label class="file-button">
+        <input id="fileInput" type="file" accept=".csv,.txt" />
+        Abrir CSV
+      </label>
+    </header>
+
+    <main>
+      <section class="panel controls">
+        <label>
+          Indicador
+          <select id="indicatorSelect"></select>
+        </label>
+        <label>
+          Periodo
+          <select id="periodSelect">
+            <option value="month">Mensal</option>
+            <option value="quarter">Trimestral</option>
+            <option value="year">Anual</option>
+          </select>
+        </label>
+        <label>
+          Nivel territorial
+          <select id="geoLevel">
+            <option value="munic">Municipio</option>
+            <option value="aisp">AISP</option>
+            <option value="risp">RISP</option>
+            <option value="cisp">CISP</option>
+            <option value="regiao">Regiao</option>
+          </select>
+        </label>
+        <label>
+          Ano inicial
+          <input id="startYear" type="number" min="1900" max="2100" value="2003" />
+        </label>
+        <label>
+          Ano final
+          <input id="endYear" type="number" min="1900" max="2100" value="2026" />
+        </label>
+        <label>
+          Media movel
+          <input id="movingAverage" type="number" min="1" max="24" value="3" />
+        </label>
+        <button id="analyzeButton" type="button" disabled>Analisar</button>
+        <button id="printButton" type="button" disabled>Salvar PDF</button>
+      </section>
+
+      <section id="statusBox" class="status">Carregando data/BaseDPEvolucaoMensalCisp.csv...</section>
+
+      <section class="metrics">
+        <article>
+          <span>Linhas usadas</span>
+          <strong id="rowsUsed">0</strong>
+        </article>
+        <article>
+          <span>Total</span>
+          <strong id="totalValue">0</strong>
+        </article>
+        <article>
+          <span>Tendencia</span>
+          <strong id="trendValue">-</strong>
+        </article>
+        <article>
+          <span>Atipicos</span>
+          <strong id="anomalyCount">0</strong>
+        </article>
+        <article>
+          <span>Territorios</span>
+          <strong id="territoryCount">0</strong>
+        </article>
+      </section>
+
+      <section class="layout">
+        <aside class="panel sidebar">
+          <div class="section-heading">
+            <h2>Filtros</h2>
+            <button id="clearFilters" type="button">Todas</button>
+          </div>
+          <label>
+            Municipio
+            <select id="municFilter" multiple></select>
+          </label>
+          <label>
+            AISP
+            <select id="aispFilter" multiple></select>
+          </label>
+          <label>
+            RISP
+            <select id="rispFilter" multiple></select>
+          </label>
+          <label>
+            Regiao
+            <select id="regiaoFilter" multiple></select>
+          </label>
+        </aside>
+
+        <section class="chart-wrap">
+          <div class="chart-title">
+            <h2>Serie temporal</h2>
+            <span id="chartSubtitle">Nenhuma base carregada</span>
+          </div>
+          <svg id="chart" role="img" aria-label="Grafico temporal do indicador selecionado"></svg>
+        </section>
+      </section>
+
+      <section class="panel narrative-panel">
+        <div class="section-heading">
+          <h2>Analise automatica</h2>
+          <button id="copyAnalysis" type="button" disabled>Copiar</button>
+        </div>
+        <div id="analysisText" class="analysis-text">Carregue a base para gerar a analise.</div>
+      </section>
+
+      <section class="panel">
+        <h2>Projecao linear dos proximos 3 periodos</h2>
+        <div id="forecastText" class="analysis-text">Sem projecao ainda.</div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Periodo</th>
+                <th>Valor projetado</th>
+              </tr>
+            </thead>
+            <tbody id="forecastBody">
+              <tr><td colspan="2">Sem dados.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Ranking territorial</h2>
+        <div id="territoryText" class="analysis-text">Sem ranking ainda.</div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Territorio</th>
+                <th>Total</th>
+                <th>Participacao</th>
+                <th>Tendencia mensal</th>
+              </tr>
+            </thead>
+            <tbody id="territoryBody">
+              <tr><td colspan="4">Sem dados.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Resumo por periodo</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Periodo</th>
+                <th>Valor</th>
+                <th>Media movel</th>
+                <th>Variacao</th>
+                <th>Var. ano anterior</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="summaryBody">
+              <tr><td colspan="6">Sem dados.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
